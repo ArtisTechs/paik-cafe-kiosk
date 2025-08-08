@@ -10,13 +10,14 @@ import { fetchItemList } from "@/services/item-services";
 import { fetchItemTypes } from "@/services/item-type-services";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useIsFocused } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { Image as ExpoImage } from "expo-image";
 import * as Network from "expo-network";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
   Dimensions,
   FlatList,
   ScrollView,
@@ -27,7 +28,6 @@ import {
 } from "react-native";
 
 const { width } = Dimensions.get("window");
-
 const INACTIVITY_DURATION = 60000 * 5; // 5 minutes
 const PROMPT_TIMEOUT = 15000;
 
@@ -43,62 +43,68 @@ export default function MenuScreen() {
   const router = useRouter();
   const [confirmPaymentVisible, setConfirmPaymentVisible] = useState(false);
   const [inactivityPromptVisible, setInactivityPromptVisible] = useState(false);
-  const [inactivityTimer, setInactivityTimer] = useState<NodeJS.Timeout | null>(
-    null
-  );
-  const [autoReturnTimer, setAutoReturnTimer] = useState<NodeJS.Timeout | null>(
-    null
-  );
+  const [inactivityTimer, setInactivityTimer] = useState<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const [autoReturnTimer, setAutoReturnTimer] = useState<ReturnType<
+    typeof setTimeout
+  > | null>(null);
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const isFocused = useIsFocused();
-  const [loading, setLoading] = useState(true);
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => true;
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        onBackPress
+      );
+      return () => subscription.remove();
+    }, [])
+  );
 
   useEffect(() => {
+    let didCancel = false;
     (async () => {
-      setLoading(true);
+      const cachedTypes = JSON.parse(
+        (await AsyncStorage.getItem(STORAGE_KEY.ITEM_TYPES)) || "[]"
+      );
+      const cachedMenu = JSON.parse(
+        (await AsyncStorage.getItem(STORAGE_KEY.ITEMS)) || "[]"
+      );
+      if (!didCancel) {
+        setItemTypes(cachedTypes);
+        setItems(cachedMenu);
+        setSelectedType(cachedTypes[0]?.id ?? null);
+      }
+
+      setRefreshing(true);
       try {
         const networkState = await Network.getNetworkStateAsync();
-
         if (networkState.isConnected && networkState.isInternetReachable) {
-          console.log("Fetching data from API...");
           const types = await fetchItemTypes();
           const menu = await fetchItemList();
-          setItemTypes(types);
-          setItems(menu);
-          setSelectedType(types[0]?.id);
-
-          await AsyncStorage.setItem(
-            STORAGE_KEY.ITEM_TYPES,
-            JSON.stringify(types)
-          );
-          await AsyncStorage.setItem(STORAGE_KEY.ITEMS, JSON.stringify(menu));
-        } else {
-          console.log("No internet connection, using cached data.");
-          const types = JSON.parse(
-            (await AsyncStorage.getItem(STORAGE_KEY.ITEM_TYPES)) || "[]"
-          );
-          const menu = JSON.parse(
-            (await AsyncStorage.getItem(STORAGE_KEY.ITEMS)) || "[]"
-          );
-          setItemTypes(types);
-          setItems(menu);
-          setSelectedType(types[0]?.id);
+          if (!didCancel) {
+            setItemTypes(types);
+            setItems(menu);
+            setSelectedType(types[0]?.id ?? null);
+            // Update cache
+            await AsyncStorage.setItem(
+              STORAGE_KEY.ITEM_TYPES,
+              JSON.stringify(types)
+            );
+            await AsyncStorage.setItem(STORAGE_KEY.ITEMS, JSON.stringify(menu));
+          }
         }
-      } catch (err) {
-        // On error (API/network/caching): fallback to cache
-        const types = JSON.parse(
-          (await AsyncStorage.getItem(STORAGE_KEY.ITEM_TYPES)) || "[]"
-        );
-        const menu = JSON.parse(
-          (await AsyncStorage.getItem(STORAGE_KEY.ITEMS)) || "[]"
-        );
-        setItemTypes(types);
-        setItems(menu);
-        setSelectedType(types[0]?.id);
-      }
-      setLoading(false);
+      } catch (err) {}
+      if (!didCancel) setRefreshing(false);
     })();
+    return () => {
+      didCancel = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -119,7 +125,6 @@ export default function MenuScreen() {
       if (inactivityTimer) clearTimeout(inactivityTimer);
       if (autoReturnTimer) clearTimeout(autoReturnTimer);
     }
-
     return () => {
       if (inactivityTimer) clearTimeout(inactivityTimer);
       if (autoReturnTimer) clearTimeout(autoReturnTimer);
@@ -129,7 +134,6 @@ export default function MenuScreen() {
   const resetInactivityTimer = () => {
     if (inactivityTimer) clearTimeout(inactivityTimer);
     if (autoReturnTimer) clearTimeout(autoReturnTimer);
-
     setInactivityTimer(
       setTimeout(() => {
         setInactivityPromptVisible(true);
@@ -174,7 +178,6 @@ export default function MenuScreen() {
           },
         ];
       }
-
       AsyncStorage.setItem(STORAGE_KEY.ORDERS, JSON.stringify(updatedCart));
       return updatedCart;
     });
@@ -198,7 +201,6 @@ export default function MenuScreen() {
           />
           <Text style={styles.typeButtonText}>Menu</Text>
         </View>
-
         <PromoCarousel images={PromoImages} height={180} width={500} />
       </View>
       <View style={styles.menuBody}>
@@ -238,7 +240,8 @@ export default function MenuScreen() {
             ))}
           </ScrollView>
         </View>
-        {loading ? (
+
+        {items.length === 0 ? (
           <View
             style={{
               flex: 1,
@@ -247,44 +250,52 @@ export default function MenuScreen() {
               minHeight: 300,
             }}
           >
-            <ActivityIndicator size={90} color={Colors.primary} />
+            <ActivityIndicator size={90} color={Colors.secondary} />
           </View>
         ) : (
-          <FlatList
-            data={filteredItems}
-            numColumns={2}
-            contentContainerStyle={styles.gridContainer}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                onPress={() => {
-                  resetInactivityTimer();
-                  handleItemClicked(item);
-                }}
-              >
-                <View style={styles.itemCard}>
-                  {item.photo ? (
-                    <ExpoImage
-                      source={item.photo}
-                      style={styles.itemImage}
-                      cachePolicy="disk"
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View style={[styles.itemImage, styles.iconImage]}>
-                      <MaterialIcons
-                        name="restaurant-menu"
-                        size={150}
-                        color={Colors.tertiary}
+          <>
+            <FlatList
+              data={filteredItems}
+              numColumns={2}
+              contentContainerStyle={styles.gridContainer}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  onPress={() => {
+                    resetInactivityTimer();
+                    handleItemClicked(item);
+                  }}
+                >
+                  <View style={styles.itemCard}>
+                    {item.photo ? (
+                      <ExpoImage
+                        source={item.photo}
+                        style={styles.itemImage}
+                        cachePolicy="disk"
+                        resizeMode="cover"
                       />
-                    </View>
-                  )}
-                  <Text style={styles.itemName}>{item.name}</Text>
-                </View>
-              </TouchableOpacity>
+                    ) : (
+                      <View style={[styles.itemImage, styles.iconImage]}>
+                        <MaterialIcons
+                          name="restaurant-menu"
+                          size={150}
+                          color={Colors.tertiary}
+                        />
+                      </View>
+                    )}
+                    <Text style={styles.itemName}>{item.name}</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+            {refreshing && (
+              <View style={{ position: "absolute", right: 20, top: 5 }}>
+                <ActivityIndicator size={36} color={Colors.secondary} />
+              </View>
             )}
-          />
+          </>
         )}
+
         <MenuItemModal
           visible={modalVisible}
           item={selectedItem}
@@ -381,7 +392,7 @@ export default function MenuScreen() {
             <TouchableOpacity
               style={[
                 styles.footerProceedButton,
-                cart.length === 0 && { backgroundColor: "#888" }, // grayed out
+                cart.length === 0 && { backgroundColor: "#888" },
               ]}
               onPress={() => {
                 resetInactivityTimer();
@@ -392,7 +403,7 @@ export default function MenuScreen() {
               <Text
                 style={[
                   styles.footerProceedText,
-                  cart.length === 0 && { color: "#eee" }, // dim text
+                  cart.length === 0 && { color: "#eee" },
                 ]}
               >
                 Proceed Payment

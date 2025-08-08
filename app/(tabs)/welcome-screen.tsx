@@ -3,9 +3,11 @@ import { Colors } from "@/constants/Colors";
 import { PromoImages } from "@/enum";
 import { STORAGE_KEY } from "@/keys";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import React from "react";
 import {
+  BackHandler,
   Image,
   ScrollView,
   StyleSheet,
@@ -21,6 +23,19 @@ export default function WelcomeScreen() {
     await AsyncStorage.setItem(STORAGE_KEY.ORDER_TYPE, mode);
     router.push({ pathname: "/menu-screen", params: { mode } });
   };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => true;
+
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        onBackPress
+      );
+
+      return () => subscription.remove();
+    }, [])
+  );
 
   return (
     <ScrollView contentContainerStyle={styles.container}>

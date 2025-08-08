@@ -5,15 +5,17 @@ import { STORAGE_KEY } from "@/keys";
 import { getMenuItemPrice } from "@/services";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    FlatList,
-    Image,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  BackHandler,
+  FlatList,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 export default function ViewOrderScreen() {
@@ -23,6 +25,19 @@ export default function ViewOrderScreen() {
   const [confirmPaymentVisible, setConfirmPaymentVisible] = useState(false);
 
   const router = useRouter();
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => true;
+
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        onBackPress
+      );
+
+      return () => subscription.remove();
+    }, [])
+  );
 
   useEffect(() => {
     // Load from AsyncStorage

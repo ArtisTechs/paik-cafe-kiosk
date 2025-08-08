@@ -7,18 +7,19 @@ import { printReceipt } from "@/services/printer-service";
 import webSocketServices from "@/services/web-socket-services";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useIsFocused } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    Image,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Animated,
+  BackHandler,
+  Dimensions,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 const { width } = Dimensions.get("window");
@@ -74,7 +75,7 @@ const PaymentScreen = () => {
   const [printing, setPrinting] = useState(false);
   const [printerError, setPrinterError] = useState<string | null>(null);
   const isFocused = useIsFocused();
-  const countdownRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownRef = useRef<any>(null);
   const [showPrintInstruction, setShowPrintInstruction] = useState(false);
   const [instructionTimer, setInstructionTimer] = useState(
     PRINT_INSTRUCTION_DURATION
@@ -97,17 +98,15 @@ const PaymentScreen = () => {
     };
   }, []);
 
-  // Effect 2: WebSocket connection — only when focused and not loading
   useEffect(() => {
     let mounted = true;
 
     const handleWebSocketMessage = (data: any) => {
       if (!mounted) return;
 
-      // Use requestAnimationFrame to schedule state updates after render
       requestAnimationFrame(() => {
-        if (data.amount !== undefined) {
-          setReceivedAmount(Number(data.amount));
+        if (data.total !== undefined) {
+          setReceivedAmount(Number(data.total));
         }
         if (data.status === "complete") {
           setPaymentComplete(true);
@@ -135,8 +134,21 @@ const PaymentScreen = () => {
     console.log("[WebSocket] Activate command sent with totalAmount:", amount);
   }, []);
 
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => true;
+
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        onBackPress
+      );
+
+      return () => subscription.remove();
+    }, [])
+  );
+
   useEffect(() => {
-    let timer: NodeJS.Timeout | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     if (!loading && cart.length > 0) {
       timer = setTimeout(() => {
         sendActivate(totalAmount);
@@ -346,13 +358,35 @@ const PaymentScreen = () => {
               Click the <Text style={{ fontWeight: "bold" }}>print</Text> button
               to print the receipt.
             </Text>
-            <Text
-              style={{ color: Colors.secondary, fontSize: 16, marginTop: 24 }}
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                marginTop: 24,
+              }}
             >
-              This screen will close in{" "}
-              <Text style={{ fontWeight: "bold" }}>{instructionTimer}</Text>{" "}
-              second{instructionTimer > 1 ? "s" : ""}
-            </Text>
+              <ActivityIndicator
+                size={18}
+                color={Colors.secondary}
+                style={{ marginRight: 10 }}
+              />
+              <Text style={{ color: Colors.secondary, fontSize: 16 }}>
+                This screen will close in{" "}
+              </Text>
+              <Text
+                style={{
+                  fontWeight: "bold",
+                  color: Colors.secondary,
+                  fontSize: 16,
+                }}
+              >
+                {instructionTimer}
+              </Text>
+              <Text style={{ color: Colors.secondary, fontSize: 16 }}>
+                {" "}
+                second{instructionTimer > 1 ? "s" : ""}
+              </Text>
+            </View>
           </Animated.View>
         ) : (
           <Animated.View
@@ -372,7 +406,7 @@ const PaymentScreen = () => {
             {createdOrder && <Receipt order={createdOrder} cart={cart} />}
             {returning && (
               <View style={{ alignItems: "center", marginTop: 24 }}>
-                <ActivityIndicator size={40} color={Colors.primary} />
+                <ActivityIndicator size={40} color={Colors.secondary} />
                 <Text
                   style={{
                     color: Colors.secondary,

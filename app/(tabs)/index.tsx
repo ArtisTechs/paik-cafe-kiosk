@@ -21,8 +21,8 @@ export default function Index() {
   useEffect(() => {
     if (!loading && hasBranch !== null) {
       if (hasBranch) {
-        // router.replace("/(tabs)/welcome-screen");
-        router.replace("/(tabs)/menu-screen");
+        router.replace("/(tabs)/welcome-screen");
+        // router.replace("/(tabs)/menu-screen");
       } else {
         router.replace("/(tabs)/scan-qr-screen");
       }

@@ -1,9 +1,17 @@
 import { Colors } from "@/constants/Colors";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
-import { Button, Image, StyleSheet, Text, View } from "react-native";
+import {
+  BackHandler,
+  Button,
+  Image,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
 const SQUARE_SIZE = 450;
 
@@ -12,6 +20,19 @@ export default function QrBranchScreen() {
   const [scanned, setScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => true;
+
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        onBackPress
+      );
+
+      return () => subscription.remove();
+    }, [])
+  );
 
   React.useEffect(() => {
     if (permission?.status === "denied") {
