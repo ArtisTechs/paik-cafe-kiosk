@@ -50,7 +50,7 @@ export default function RootLayout() {
           options={{ headerShown: false }}
         />
       </Stack>
-      <StatusBar style="auto" />
+      <StatusBar hidden />
     </ThemeProvider>
   );
 }

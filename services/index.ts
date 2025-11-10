@@ -3,5 +3,6 @@ export * from "./global-services";
 export * from "./item-services";
 export * from "./item-type-services";
 export * from "./order-services";
+export * from "./position-services";
 export * from "./user-services";
 

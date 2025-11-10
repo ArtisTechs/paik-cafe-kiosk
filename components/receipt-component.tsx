@@ -1,10 +1,17 @@
-import { Colors } from "@/constants/Colors";
 import { CartItem } from "@/interface/items.interface";
 import { getMenuItemPrice } from "@/services";
 import React from "react";
-import { Dimensions, StyleSheet, Text, View } from "react-native";
+import { Dimensions, Platform, StyleSheet, Text, View } from "react-native";
 
-const { width } = Dimensions.get("window");
+const RECEIPT_WIDTH = Math.min(
+  320,
+  Math.floor(Dimensions.get("window").width * 0.9)
+);
+const MONO = Platform.select({
+  ios: "Courier New",
+  android: "monospace",
+  default: "monospace",
+});
 
 type ReceiptProps = {
   order: any;
@@ -14,155 +21,213 @@ type ReceiptProps = {
 export default function Receipt({ order, cart }: ReceiptProps) {
   if (!order) return null;
 
-  const orderItems = cart.map((cartItem, idx) => ({
-    name: cartItem.item?.name,
-    variation: cartItem.variation,
-    quantity: cartItem.quantity,
-    price: getMenuItemPrice(cartItem.item, cartItem.variation),
-    total:
-      getMenuItemPrice(cartItem.item, cartItem.variation) * cartItem.quantity,
-  }));
+  const items = cart.map((c) => {
+    const price = getMenuItemPrice(c.item, c.variation) || 0;
+    return {
+      name: c.item?.name || "",
+      quantity: c.quantity || 0,
+      price,
+      lineTotal: price * (c.quantity || 0),
+    };
+  });
 
-  const orderTypeLabel =
-    order.orderType === "DINE_IN"
+  const [printedAt] = React.useState(() => new Date());
+
+  const qtyTotal = items.reduce((s, i) => s + i.quantity, 0);
+  const subTotal = items.reduce((s, i) => s + i.lineTotal, 0);
+
+  const toPeso = (n: number) => `₱${(n || 0).toFixed(2)}`;
+  const orderType =
+    order?.orderType === "DINE_IN"
       ? "Dine In"
-      : order.orderType === "TAKE_OUT"
+      : order?.orderType === "TAKE_OUT"
       ? "Take Out"
-      : order.orderType;
+      : order?.orderType || "—";
+
+  const now = new Date();
+  const dateText = printedAt.toLocaleDateString("en-PH", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  // formatted time in 12-hour clock with AM/PM
+  const timeText = printedAt.toLocaleTimeString("en-PH", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
 
   return (
-    <View style={styles.receiptContainer}>
-      <Text style={styles.receiptTitle}>RECEIPT</Text>
-      <Text style={styles.orderNumber}>
-        Order No:{" "}
-        <Text style={{ fontWeight: "bold" }}>{order.orderNo || "N/A"}</Text>
+    <View style={[styles.paper, { width: RECEIPT_WIDTH }]}>
+      {/* Header */}
+      <Text style={styles.brand}>PAIK’S COFFEE</Text>
+      <Text style={styles.brandSub}>FRIENDSHIP CLARK</Text>
+      <Text style={styles.centerSmall}>
+        Blk 23 Lot 08 Cruz Wood Plates St.{"\n"}
+        Brgy. Anunas, Angeles City{"\n"}
+        Contact No. 0954 255 9351
       </Text>
-      <Text style={styles.receiptSub}>
-        Order Type: <Text style={{ fontWeight: "bold" }}>{orderTypeLabel}</Text>
-      </Text>
-      <View style={styles.receiptLine} />
 
-      {/* Column Headers */}
-      <View style={[styles.row, { marginBottom: 5 }]}>
-        <Text style={[styles.cellItem, styles.headerCell]}>Item</Text>
-        <Text style={[styles.cellVar, styles.headerCell]}>Var.</Text>
-        <Text style={[styles.cellQty, styles.headerCell]}>Qty</Text>
-        <Text style={[styles.cellPrice, styles.headerCell]}>Price</Text>
-        <Text style={[styles.cellTotal, styles.headerCell]}>Total</Text>
+      <View style={styles.rule} />
+
+      {/* Table number block */}
+      <Text style={styles.sectionTitle}>TABLE NUMBER</Text>
+      <View style={styles.rule} />
+      <Text style={styles.centerSmall}>Time: {timeText}</Text>
+      <Text style={styles.centerSmall}>Date: {dateText}</Text>
+      <Text style={styles.centerSmall}>Order No.: {order?.orderNo || "—"}</Text>
+      <Text style={styles.centerSmall}>Type: {orderType}</Text>
+      <Text style={styles.centerSmall}>Table: {order?.tableNumber || ""}</Text>
+
+      <View style={styles.rule} />
+
+      {/* Items header */}
+      <View style={[styles.row, { marginTop: 2 }]}>
+        <Text style={[styles.cellItem, styles.header]}>Item</Text>
+        <Text style={[styles.cellQty, styles.header, { textAlign: "center" }]}>
+          Quantity
+        </Text>
+        <Text style={[styles.cellAmt, styles.header, { textAlign: "right" }]}>
+          Amount
+        </Text>
       </View>
 
-      {/* Rows */}
-      {orderItems.map((item, idx) => (
-        <View style={styles.row} key={idx}>
+      {/* Items */}
+      {items.map((it, i) => (
+        <View key={i} style={styles.row}>
           <Text style={styles.cellItem} numberOfLines={1}>
-            {item.name}
+            {it.name}
           </Text>
-          <Text style={styles.cellVar} numberOfLines={1}>
-            {item.variation}
+          <Text style={[styles.cellQty, { textAlign: "center" }]}>
+            {it.quantity}
           </Text>
-          <Text style={styles.cellQty}>{item.quantity}</Text>
-          <Text style={styles.cellPrice}>₱{item.price.toFixed(2)}</Text>
-          <Text style={styles.cellTotal}>₱{item.total.toFixed(2)}</Text>
+          <Text style={[styles.cellAmt, { textAlign: "right" }]}>
+            {toPeso(it.lineTotal)}
+          </Text>
         </View>
       ))}
 
-      <View style={styles.receiptLine} />
-      <Text style={styles.receiptTotal}>
-        Total: ₱{order.totalPrice.toFixed(2)}
-      </Text>
-      <Text style={styles.receiptTotal}>Cash: ₱{order.cash.toFixed(2)}</Text>
-      <Text style={styles.receiptTotal}>
-        Change: ₱{order.changeAmount.toFixed(2)}
-      </Text>
-      <View style={{ marginTop: 18 }}>
-        <Text style={{ color: "#888", fontSize: 14 }}>
-          Thank you for your order!
+      <View style={styles.rule} />
+
+      {/* Totals summary */}
+      <View style={styles.row}>
+        <Text style={styles.cellItem}>Qty Total:</Text>
+        <Text style={[styles.cellQty, { textAlign: "center" }]}>
+          {qtyTotal}
+        </Text>
+        <Text style={[styles.cellAmt, { textAlign: "right" }]}></Text>
+      </View>
+      <View style={styles.row}>
+        <Text style={styles.cellItem}>Subtotal:</Text>
+        <Text style={styles.cellQty}></Text>
+        <Text style={[styles.cellAmt, { textAlign: "right" }]}>
+          {toPeso(subTotal)}
         </Text>
       </View>
+
+      <View style={styles.rule} />
+
+      <View style={styles.totalsBlock}>
+        <Text style={styles.totalLine}>
+          Total: {toPeso(order?.totalPrice ?? subTotal)}
+        </Text>
+        <Text style={styles.totalLine}>Cash: {toPeso(order?.cash ?? 0)}</Text>
+        <Text style={styles.totalLine}>
+          Change: {toPeso(order?.changeAmount ?? 0)}
+        </Text>
+      </View>
+
+      <View style={styles.rule} />
+
+      {/* Footer */}
+      <Text style={styles.thanks}>Thank you</Text>
+      <Text style={styles.centerSmall}>Please Come Again!</Text>
+      <Text style={styles.centerTiny}>This is not an Official Receipt</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  receiptContainer: {
-    marginTop: 30,
+  paper: {
     backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 22,
-    alignItems: "center",
-    width: width * 0.8,
-    elevation: 3,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    borderRadius: 6,
+    alignSelf: "center",
   },
-  receiptTitle: {
-    fontWeight: "bold",
-    fontSize: 28,
-    color: Colors.secondary,
-    letterSpacing: 2,
-    marginBottom: 8,
+  brand: {
+    fontFamily: MONO,
+    fontSize: 20,
+    textAlign: "center",
+    letterSpacing: 1,
   },
-  orderNumber: {
-    fontSize: 18,
-    color: Colors.secondary,
-    marginBottom: 10,
-  },
-  receiptSub: {
+  brandSub: {
+    fontFamily: MONO,
     fontSize: 16,
-    color: "#555",
-    marginBottom: 2,
+    textAlign: "center",
+    marginBottom: 6,
   },
-  receiptLine: {
-    width: "100%",
+  centerSmall: {
+    fontFamily: MONO,
+    fontSize: 12,
+    textAlign: "center",
+  },
+  centerTiny: {
+    fontFamily: MONO,
+    fontSize: 10,
+    textAlign: "center",
+    marginTop: 4,
+  },
+  sectionTitle: {
+    fontFamily: MONO,
+    fontSize: 18,
+    textAlign: "center",
+    marginVertical: 6,
+  },
+  rule: {
     height: 1,
-    backgroundColor: "#eee",
-    marginVertical: 10,
+    backgroundColor: "#000",
+    opacity: 0.8,
+    marginVertical: 8,
   },
   row: {
     flexDirection: "row",
-    width: "100%",
-    marginBottom: 2,
+    marginVertical: 2,
   },
-  headerCell: {
-    fontWeight: "bold",
-    color: Colors.secondary,
+  header: {
+    fontFamily: MONO,
+    fontSize: 12,
   },
   cellItem: {
-    flex: 2.1, // Item name (more space)
-    fontSize: 15,
-    color: "#222",
-  },
-  cellVar: {
-    flex: 1, // Variation
-    fontSize: 15,
-    color: "#222",
-    textAlign: "center",
+    fontFamily: MONO,
+    fontSize: 12,
+    flex: 2,
   },
   cellQty: {
-    flex: 0.6,
-    fontSize: 15,
-    color: "#222",
-    textAlign: "center",
-  },
-  cellPrice: {
+    fontFamily: MONO,
+    fontSize: 12,
     flex: 1,
-    fontSize: 15,
-    color: "#222",
-    textAlign: "right",
-    paddingRight: 3,
   },
-  cellTotal: {
-    flex: 1.1,
-    fontSize: 15,
-    color: "#222",
-    textAlign: "right",
-    paddingLeft: 3,
+  cellAmt: {
+    fontFamily: MONO,
+    fontSize: 12,
+    flex: 1,
   },
-  receiptTotal: {
-    fontWeight: "bold",
-    fontSize: 18,
-    color: Colors.secondary,
+  totalsBlock: {
     marginTop: 2,
+  },
+  totalLine: {
+    fontFamily: MONO,
+    fontSize: 14,
+    textAlign: "left",
+    marginVertical: 1,
+  },
+  thanks: {
+    fontFamily: MONO,
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 6,
   },
 });

@@ -1,4 +1,4 @@
-export const MAIN_URL = "http://192.168.100.24:8080";
+export const MAIN_URL = "http://192.168.0.229:8080";
 
 export const API_URL = Object.freeze({
   BASE_URL: `${MAIN_URL}/api`, //local
@@ -24,4 +24,6 @@ export const API_URL = Object.freeze({
   ORDERS: "/orders",
   ITEM_TYPES: "/item-types",
   ITEMS: "/items",
+  ROBOT_POSITIONS: "/robot-positions",
+  CURRENT: "/current",
 });

@@ -8,6 +8,7 @@
     "scheme": "paikcoffeekiosk",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "statusBar": { "hidden": true },
     "ios": {
       "supportsTablet": true
     },

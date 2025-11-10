@@ -13,13 +13,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { Image as ExpoImage } from "expo-image";
 import * as Network from "expo-network";
-import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { usePathname, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   BackHandler,
   Dimensions,
   FlatList,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -49,111 +50,143 @@ export default function MenuScreen() {
   const [autoReturnTimer, setAutoReturnTimer] = useState<ReturnType<
     typeof setTimeout
   > | null>(null);
-
   const [cart, setCart] = useState<CartItem[]>([]);
   const isFocused = useIsFocused();
-
   const [refreshing, setRefreshing] = useState(false);
+  const pathname = usePathname();
 
+  // ---------- helpers ----------
+  const isOutOfStock = useCallback((m: MenuItem) => {
+    // supports common fields
+    // treat <=0 or falsey availability as OOS
+    const stockish =
+      (typeof (m as any).stock === "number" && (m as any).stock <= 0) ||
+      (typeof (m as any).quantity === "number" && (m as any).quantity <= 0);
+    const flags =
+      (m as any).isAvailable === false ||
+      (m as any).available === false ||
+      (m as any).inStock === false;
+    return !!(stockish || flags);
+  }, []);
+
+  const ensureSelectedType = useCallback(
+    (types: ItemType[]) => {
+      if (!types?.length) {
+        setSelectedType(null);
+        return;
+      }
+      if (!selectedType || !types.some((t) => t.id === selectedType)) {
+        setSelectedType(types[0].id);
+      }
+    },
+    [selectedType]
+  );
+
+  const loadData = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // use cache first
+      const cachedTypes =
+        JSON.parse(
+          (await AsyncStorage.getItem(STORAGE_KEY.ITEM_TYPES)) || "[]"
+        ) || [];
+      const cachedMenu =
+        JSON.parse((await AsyncStorage.getItem(STORAGE_KEY.ITEMS)) || "[]") ||
+        [];
+      if (cachedTypes.length || cachedMenu.length) {
+        setItemTypes(cachedTypes);
+        setItems(cachedMenu);
+        ensureSelectedType(cachedTypes);
+      }
+
+      // then live fetch if online
+      const net = await Network.getNetworkStateAsync();
+      if (net.isConnected && net.isInternetReachable) {
+        const [types, menu] = await Promise.all([
+          fetchItemTypes(),
+          fetchItemList(),
+        ]);
+        setItemTypes(types);
+        setItems(menu);
+        ensureSelectedType(types);
+        await AsyncStorage.setItem(
+          STORAGE_KEY.ITEM_TYPES,
+          JSON.stringify(types)
+        );
+        await AsyncStorage.setItem(STORAGE_KEY.ITEMS, JSON.stringify(menu));
+      }
+    } catch {}
+    setRefreshing(false);
+  }, [ensureSelectedType]);
+
+  // ---------- lifecycle ----------
   useFocusEffect(
     React.useCallback(() => {
       const onBackPress = () => true;
-      const subscription = BackHandler.addEventListener(
+      const sub = BackHandler.addEventListener(
         "hardwareBackPress",
         onBackPress
       );
-      return () => subscription.remove();
+      return () => sub.remove();
     }, [])
   );
 
   useEffect(() => {
-    let didCancel = false;
+    let cancelled = false;
     (async () => {
-      const cachedTypes = JSON.parse(
-        (await AsyncStorage.getItem(STORAGE_KEY.ITEM_TYPES)) || "[]"
-      );
-      const cachedMenu = JSON.parse(
-        (await AsyncStorage.getItem(STORAGE_KEY.ITEMS)) || "[]"
-      );
-      if (!didCancel) {
-        setItemTypes(cachedTypes);
-        setItems(cachedMenu);
-        setSelectedType(cachedTypes[0]?.id ?? null);
-      }
-
-      setRefreshing(true);
-      try {
-        const networkState = await Network.getNetworkStateAsync();
-        if (networkState.isConnected && networkState.isInternetReachable) {
-          const types = await fetchItemTypes();
-          const menu = await fetchItemList();
-          if (!didCancel) {
-            setItemTypes(types);
-            setItems(menu);
-            setSelectedType(types[0]?.id ?? null);
-            // Update cache
-            await AsyncStorage.setItem(
-              STORAGE_KEY.ITEM_TYPES,
-              JSON.stringify(types)
-            );
-            await AsyncStorage.setItem(STORAGE_KEY.ITEMS, JSON.stringify(menu));
-          }
-        }
-      } catch (err) {}
-      if (!didCancel) setRefreshing(false);
+      if (!cancelled) await loadData(); // initial and on mount
     })();
     return () => {
-      didCancel = true;
+      cancelled = true;
     };
-  }, []);
+  }, [loadData]);
+
+  useFocusEffect(
+    useCallback(() => {
+      // refresh every time screen regains focus
+      loadData();
+    }, [loadData])
+  );
 
   useEffect(() => {
     (async () => {
       try {
         const savedCart = await AsyncStorage.getItem(STORAGE_KEY.ORDERS);
-        if (savedCart) {
-          setCart(JSON.parse(savedCart));
-        }
-      } catch (err) {}
+        if (savedCart) setCart(JSON.parse(savedCart));
+      } catch {}
     })();
   }, []);
 
-  useEffect(() => {
-    if (isFocused) {
-      resetInactivityTimer();
-    } else {
-      if (inactivityTimer) clearTimeout(inactivityTimer);
-      if (autoReturnTimer) clearTimeout(autoReturnTimer);
-    }
-    return () => {
-      if (inactivityTimer) clearTimeout(inactivityTimer);
-      if (autoReturnTimer) clearTimeout(autoReturnTimer);
-    };
-  }, [isFocused]);
+  useFocusEffect(
+    React.useCallback(() => {
+      if (pathname === "/menu-screen") {
+        resetInactivityTimer();
+      }
 
-  const resetInactivityTimer = () => {
+      return () => {
+        if (pathname === "/menu-screen") {
+          if (inactivityTimer) clearTimeout(inactivityTimer);
+          if (autoReturnTimer) clearTimeout(autoReturnTimer);
+        }
+      };
+    }, [pathname])
+  );
+
+  const resetInactivityTimer = useCallback(() => {
     if (inactivityTimer) clearTimeout(inactivityTimer);
     if (autoReturnTimer) clearTimeout(autoReturnTimer);
-    setInactivityTimer(
-      setTimeout(() => {
-        setInactivityPromptVisible(true);
-        setAutoReturnTimer(
-          setTimeout(() => {
-            setInactivityPromptVisible(false);
-            router.replace("/(tabs)/welcome-screen");
-          }, PROMPT_TIMEOUT)
-        );
-      }, INACTIVITY_DURATION)
-    );
-  };
 
-  const handleUserAction = () => {
-    resetInactivityTimer();
-  };
+    const inactivity = setTimeout(() => {
+      setInactivityPromptVisible(true);
+      const autoReturn = setTimeout(() => {
+        setInactivityPromptVisible(false);
+        router.replace("/(tabs)/welcome-screen");
+      }, PROMPT_TIMEOUT);
+      setAutoReturnTimer(autoReturn);
+    }, INACTIVITY_DURATION);
 
-  const filteredItems = items.filter(
-    (item) => item.itemType.id === selectedType
-  );
+    setInactivityTimer(inactivity);
+  }, [inactivityTimer, autoReturnTimer]);
 
   const handleAddToCart = async (
     item: MenuItem,
@@ -169,14 +202,7 @@ export default function MenuScreen() {
         updatedCart = [...prev];
         updatedCart[idx].quantity += quantity;
       } else {
-        updatedCart = [
-          ...prev,
-          {
-            item,
-            variation,
-            quantity,
-          },
-        ];
+        updatedCart = [...prev, { item, variation, quantity }];
       }
       AsyncStorage.setItem(STORAGE_KEY.ORDERS, JSON.stringify(updatedCart));
       return updatedCart;
@@ -184,11 +210,17 @@ export default function MenuScreen() {
   };
 
   const handleItemClicked = async (item: MenuItem) => {
+    if (isOutOfStock(item)) return;
     setSelectedItem(item);
     setSelectedVariation(item.variation?.[0] || "");
     setQuantity(1);
     setModalVisible(true);
   };
+
+  const filteredItems = useMemo(
+    () => items.filter((it) => it?.itemType?.id === selectedType),
+    [items, selectedType]
+  );
 
   return (
     <View style={styles.page}>
@@ -201,12 +233,14 @@ export default function MenuScreen() {
           />
           <Text style={styles.typeButtonText}>Menu</Text>
         </View>
-        <PromoCarousel images={PromoImages} height={180} width={500} />
+        <PromoCarousel images={PromoImages} height={150} width={500} />
       </View>
+
       <View style={styles.menuBody}>
+        {/* Sidebar types with pull-to-refresh for symmetry */}
         <View style={styles.sidebar}>
           <ScrollView contentContainerStyle={{ alignItems: "flex-end" }}>
-            {itemTypes.map((type: any) => (
+            {itemTypes.map((type) => (
               <TouchableOpacity
                 key={type.id}
                 style={[
@@ -242,51 +276,106 @@ export default function MenuScreen() {
         </View>
 
         {items.length === 0 ? (
-          <View
-            style={{
-              flex: 1,
-              justifyContent: "center",
-              alignItems: "center",
-              minHeight: 300,
-            }}
-          >
+          <View style={styles.centerWrap}>
             <ActivityIndicator size={90} color={Colors.secondary} />
           </View>
         ) : (
           <>
             <FlatList
               data={filteredItems}
-              numColumns={2}
+              numColumns={3}
               contentContainerStyle={styles.gridContainer}
               keyExtractor={(item) => item.id}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  onPress={() => {
-                    resetInactivityTimer();
-                    handleItemClicked(item);
-                  }}
-                >
-                  <View style={styles.itemCard}>
-                    {item.photo ? (
-                      <ExpoImage
-                        source={item.photo}
-                        style={styles.itemImage}
-                        cachePolicy="disk"
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={[styles.itemImage, styles.iconImage]}>
-                        <MaterialIcons
-                          name="restaurant-menu"
-                          size={150}
-                          color={Colors.tertiary}
-                        />
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={loadData} />
+              }
+              renderItem={({ item }) => {
+                const oos = isOutOfStock(item);
+                const defVar = item.variation?.[0] || "";
+                const price = getMenuItemPrice(item, defVar);
+
+                const onSelect = () => {
+                  if (oos) return;
+                  resetInactivityTimer();
+                  handleItemClicked(item);
+                };
+
+                return (
+                  <TouchableOpacity
+                    style={styles.itemWrap}
+                    onPress={onSelect}
+                    activeOpacity={0.9}
+                    disabled={oos}
+                  >
+                    <View style={[styles.itemCard, oos && { opacity: 0.6 }]}>
+                      <View style={{ alignItems: "center" }}>
+                        {item.photo ? (
+                          <ExpoImage
+                            source={item.photo}
+                            style={styles.itemImage}
+                            cachePolicy="disk"
+                            resizeMode="contain"
+                          />
+                        ) : (
+                          <View style={[styles.itemImage, styles.iconImage]}>
+                            <MaterialIcons
+                              name="restaurant-menu"
+                              size={120}
+                              color={Colors.tertiary}
+                            />
+                          </View>
+                        )}
+
+                        {oos && (
+                          <View style={styles.oosBadge}>
+                            <Text style={styles.oosText}>OUT OF STOCK</Text>
+                          </View>
+                        )}
+
+                        {!oos && item?.bestSeller && (
+                          <View style={styles.bestBadge}>
+                            <MaterialIcons
+                              name="star"
+                              size={14}
+                              color="#3a2b00"
+                            />
+                            <Text style={styles.bestText}>BEST SELLER</Text>
+                          </View>
+                        )}
                       </View>
-                    )}
-                    <Text style={styles.itemName}>{item.name}</Text>
-                  </View>
-                </TouchableOpacity>
-              )}
+
+                      <Text numberOfLines={2} style={styles.itemName}>
+                        {item.name}
+                      </Text>
+
+                      <View style={styles.priceRow}>
+                        <Text style={styles.priceText}>{`₱ ${price.toFixed(
+                          2
+                        )}`}</Text>
+                        {!oos && (
+                          <TouchableOpacity
+                            onPress={onSelect}
+                            disabled={oos}
+                            style={[
+                              styles.addBtn,
+                              oos && styles.addBtnDisabled,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.addBtnText,
+                                oos && styles.addBtnTextDisabled,
+                              ]}
+                            >
+                              Add
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              }}
             />
             {refreshing && (
               <View style={{ position: "absolute", right: 20, top: 5 }}>
@@ -376,7 +465,7 @@ export default function MenuScreen() {
                 .toFixed(2)}
             </Text>
 
-            {cart.length > 0 && (
+            {/* {cart.length > 0 && (
               <TouchableOpacity
                 style={styles.footerEditButton}
                 onPress={() => {
@@ -386,7 +475,7 @@ export default function MenuScreen() {
               >
                 <Text style={styles.footerEditText}>View Order</Text>
               </TouchableOpacity>
-            )}
+            )} */}
           </View>
           <View style={styles.footerRight}>
             <TouchableOpacity
@@ -396,7 +485,7 @@ export default function MenuScreen() {
               ]}
               onPress={() => {
                 resetInactivityTimer();
-                setConfirmPaymentVisible(true);
+                router.replace("/(tabs)/view-order-screen");
               }}
               disabled={cart.length === 0}
             >
@@ -406,7 +495,7 @@ export default function MenuScreen() {
                   cart.length === 0 && { color: "#eee" },
                 ]}
               >
-                Proceed Payment
+                Proceed to Checkout
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -426,10 +515,7 @@ export default function MenuScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
+  page: { flex: 1, backgroundColor: Colors.background },
   headerContainer: {
     display: "flex",
     flexDirection: "row",
@@ -437,17 +523,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-around",
     width: "100%",
-    paddingTop: 10,
+    paddingTop: 1,
     borderBottomWidth: 5,
-    marginBottom: 5,
+    marginBottom: 3,
     borderBottomColor: Colors.secondary,
   },
-  logo: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    marginBottom: 5,
-  },
+  logo: { width: 100, height: 100, borderRadius: 60, marginBottom: 5 },
   menuBody: {
     flex: 1,
     flexDirection: "row",
@@ -475,57 +556,70 @@ const styles = StyleSheet.create({
     elevation: 2,
     alignSelf: "flex-end",
   },
-  typeButtonActive: {
-    backgroundColor: "#12204a",
-  },
-  typeButtonText: {
-    fontWeight: "bold",
-    color: Colors.secondary,
-    fontSize: 16,
-  },
-  typeButtonTextActive: {
-    color: "#fff",
-  },
+  typeButtonActive: { backgroundColor: "#12204a" },
+  typeButtonText: { fontWeight: "bold", color: Colors.secondary, fontSize: 16 },
+  typeButtonTextActive: { color: "#fff" },
   typeButtonContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     width: "100%",
   },
-  arrowIcon: {
-    marginLeft: 10,
-  },
+  arrowIcon: { marginLeft: 10 },
   gridContainer: {
     flexGrow: 1,
     padding: 12,
-    paddingLeft: 40,
+    paddingLeft: 20,
     paddingBottom: 300,
     alignItems: "flex-start",
     justifyContent: "flex-start",
   },
-  itemCard: {
+  centerWrap: {
+    flex: 1,
+    justifyContent: "center",
     alignItems: "center",
-    margin: 12,
-    width: (width - 120 - 60) / 3,
+    minHeight: 300,
+  },
+  itemCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   itemImage: {
     width: 150,
     height: 150,
-    borderRadius: 14,
+    borderRadius: 10,
     marginBottom: 8,
+    backgroundColor: "#fff",
   },
   itemName: {
-    textAlign: "center",
-    fontSize: 18,
+    textAlign: "left",
+    fontSize: 16,
     color: Colors.secondary,
-    fontWeight: "600",
+    fontWeight: "700",
+    minHeight: 42,
   },
   iconImage: {
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: Colors.secondary,
   },
-
+  oosBadge: {
+    position: "absolute",
+    bottom: 8,
+    left: 8,
+    right: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    alignItems: "center",
+  },
+  oosText: { color: "#fff", fontWeight: "bold", fontSize: 12 },
   footer: {
     backgroundColor: Colors.secondary,
     borderTopLeftRadius: 50,
@@ -543,11 +637,7 @@ const styles = StyleSheet.create({
     width: "100%",
     zIndex: 999,
   },
-  footerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 2,
-  },
+  footerLeft: { flexDirection: "row", alignItems: "center", flex: 2 },
   footerText: {
     color: "#fff",
     fontSize: 18,
@@ -560,11 +650,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     marginRight: 18,
   },
-  footerRight: {
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 15,
-  },
+  footerRight: { flexDirection: "column", alignItems: "center", gap: 15 },
   footerEditButton: {
     backgroundColor: Colors.primary,
     borderRadius: 10,
@@ -572,17 +658,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     marginRight: 8,
   },
-  footerEditText: {
-    color: Colors.secondary,
-    fontWeight: "bold",
-    fontSize: 16,
-  },
+  footerEditText: { color: Colors.secondary, fontWeight: "bold", fontSize: 16 },
   footerProceedButton: {
     backgroundColor: Colors.primary,
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 22,
-    width: 200,
+    width: 250,
     alignItems: "center",
   },
   footerProceedText: {
@@ -595,17 +677,47 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 5,
     paddingHorizontal: 15,
-    width: 200,
+    width: 250,
     alignItems: "center",
   },
-  footerCancelText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 14,
+  footerCancelText: { color: "#fff", fontWeight: "bold", fontSize: 14 },
+  basketImage: { width: 80, height: 80, marginRight: 5 },
+  itemWrap: { padding: 10, width: (width - 200 - 60) / 3 },
+
+  priceRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
-  basketImage: {
-    width: 80,
-    height: 80,
-    marginRight: 5,
+  priceText: { fontSize: 14, color: "#666", fontWeight: "600" },
+
+  addBtn: {
+    backgroundColor: "#FFE600",
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  addBtnText: { color: Colors.secondary, fontWeight: "800", fontSize: 14 },
+
+  addBtnDisabled: { backgroundColor: "#ccc" },
+  addBtnTextDisabled: { color: "#666" },
+  bestBadge: {
+    position: "absolute",
+    bottom: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: "#FFE08A",
+    borderWidth: 1,
+    borderColor: "#D4AF37",
+  },
+  bestText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#3a2b00",
   },
 });

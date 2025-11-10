@@ -16,8 +16,11 @@ import {
   View,
 } from "react-native";
 
+type Stage = "LANDING" | "MODE";
+
 export default function WelcomeScreen() {
   const router = useRouter();
+  const [stage, setStage] = React.useState<Stage>("LANDING");
 
   const handleSelect = async (mode: "DINE_IN" | "TAKE_OUT") => {
     await AsyncStorage.setItem(STORAGE_KEY.ORDER_TYPE, mode);
@@ -26,51 +29,84 @@ export default function WelcomeScreen() {
 
   useFocusEffect(
     React.useCallback(() => {
-      const onBackPress = () => true;
+      const onBackPress = () => {
+        if (stage === "MODE") {
+          setStage("LANDING");
+          return true;
+        }
+        return true;
+      };
 
-      const subscription = BackHandler.addEventListener(
+      const sub = BackHandler.addEventListener(
         "hardwareBackPress",
         onBackPress
       );
-
-      return () => subscription.remove();
-    }, [])
+      return () => sub.remove();
+    }, [stage])
   );
+
+  const handleStartOrdering = React.useCallback(async () => {
+    await AsyncStorage.removeItem(STORAGE_KEY.ORDERS);
+    await AsyncStorage.removeItem(STORAGE_KEY.SAVED_ORDER);
+    setStage("MODE");
+  }, []);
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      <Image
+        source={require("../../assets/images/coffee-background.png")}
+        style={styles.coffeeBackground}
+        resizeMode="cover"
+      />
+
       <Text style={styles.title}>Welcome to Paik’s Coffee!</Text>
+
       <Image
         source={require("../../assets/images/paik-logo.png")}
         style={styles.logo}
       />
-      <Text style={styles.subtitle}>What would you like to do today?</Text>
-      <View style={styles.buttonRow}>
-        <TouchableOpacity
-          style={styles.button}
-          onPress={() => handleSelect("DINE_IN")}
-        >
-          <Image
-            source={require("../../assets/images/dine-in-icon.png")}
-            style={styles.takeoutImage}
-            resizeMode="contain"
-          />
-          <Text style={styles.buttonText}>Dine In</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.button}
-          onPress={() => handleSelect("TAKE_OUT")}
-        >
-          <Image
-            source={require("../../assets/images/takeout-icon.png")}
-            style={styles.takeoutImage}
-            resizeMode="contain"
-          />
-          <Text style={styles.buttonText}>Take Out</Text>
-        </TouchableOpacity>
-      </View>
-      <PromoCarousel images={PromoImages} />
-      <View style={styles.blueArcContainer}></View>
+
+      {stage === "LANDING" && (
+        <>
+          <TouchableOpacity style={styles.cta} onPress={handleStartOrdering}>
+            <Text style={styles.ctaText}>Start Ordering</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {stage === "MODE" && (
+        <>
+          <Text style={styles.subtitle}>What would you like to do today?</Text>
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              style={styles.button}
+              onPress={() => handleSelect("DINE_IN")}
+            >
+              <Image
+                source={require("../../assets/images/dine-in-icon.png")}
+                style={styles.takeoutImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.buttonText}>Dine In</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.button}
+              onPress={() => handleSelect("TAKE_OUT")}
+            >
+              <Image
+                source={require("../../assets/images/takeout-icon.png")}
+                style={styles.takeoutImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.buttonText}>Take Out</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
+
+      <PromoCarousel images={PromoImages} height={400} width={850} />
+      <View style={styles.blueArcContainer} />
     </ScrollView>
   );
 }
@@ -82,7 +118,7 @@ const styles = StyleSheet.create({
     width: "100%",
     backgroundColor: Colors.background,
     alignItems: "center",
-    paddingTop: 120,
+    paddingTop: 260,
   },
   title: {
     fontSize: 48,
@@ -98,6 +134,20 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     marginTop: 8,
   },
+  // LANDING
+  cta: {
+    backgroundColor: "#ffe600",
+    paddingVertical: 16,
+    paddingHorizontal: 28,
+    borderRadius: 14,
+    marginTop: 8,
+    elevation: 3,
+    marginBottom: 90,
+  },
+  ctaText: { fontSize: 20, fontWeight: "800", color: Colors.secondary },
+  drinksRow: { width: "100%", height: 180, marginTop: 24 },
+
+  // MODE
   subtitle: {
     fontSize: 24,
     color: Colors.secondary,
@@ -114,10 +164,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffe600",
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
+    padding: 15,
     borderRadius: 16,
-    width: 250,
-    height: 300,
+    width: 200,
+    height: 250,
     shadowColor: Colors.secondary,
     shadowOpacity: 0.2,
     shadowOffset: { width: 2, height: 2 },
@@ -127,16 +177,10 @@ const styles = StyleSheet.create({
   buttonText: {
     fontWeight: "bold",
     color: Colors.secondary,
-    fontSize: 32,
-    marginTop: 10,
+    fontSize: 26,
   },
-  takeoutImage: {
-    width: 180,
-    height: 180,
-    marginBottom: 5,
-  },
-  carouselContainer: { marginTop: 40, marginBottom: 10 },
-  carouselImage: { width: 150, height: 150, borderRadius: 16, marginRight: 16 },
+  takeoutImage: { width: 120, height: 180 },
+
   blueArcContainer: {
     position: "absolute",
     bottom: -100,
@@ -146,6 +190,14 @@ const styles = StyleSheet.create({
     width: "115%",
     backgroundColor: Colors.secondary,
     borderRadius: "100%",
+    zIndex: -1,
+  },
+  coffeeBackground: {
+    width: "100%",
+    height: 450,
+    position: "absolute",
+    top: 20,
+    left: 0,
     zIndex: -1,
   },
 });

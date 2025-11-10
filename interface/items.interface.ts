@@ -13,6 +13,7 @@ export interface MenuItem {
   price: number[];
   photo: string;
   inStock: boolean;
+  bestSeller?: boolean;
 }
 
 export interface CartItem {

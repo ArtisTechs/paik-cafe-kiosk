@@ -19,5 +19,5 @@ export const Colors = {
   darkTertiary: "#162147",
   darkDanger: "#bb4343",
   darkSuccess: "#218d3a",
-  background: "#FFFDD0",
+  background: "#fffeeaff",
 };

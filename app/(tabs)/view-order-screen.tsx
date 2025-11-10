@@ -6,7 +6,7 @@ import { getMenuItemPrice } from "@/services";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
-import { useRouter } from "expo-router";
+import { usePathname, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   BackHandler,
@@ -18,11 +18,22 @@ import {
   View,
 } from "react-native";
 
+const INACTIVITY_DURATION = 60000 * 5 ;
+const PROMPT_TIMEOUT = 15000;
+
 export default function ViewOrderScreen() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
   const [confirmPaymentVisible, setConfirmPaymentVisible] = useState(false);
+  const [inactivityPromptVisible, setInactivityPromptVisible] = useState(false);
+  const [inactivityTimer, setInactivityTimer] = useState<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const [autoReturnTimer, setAutoReturnTimer] = useState<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const pathname = usePathname();
 
   const router = useRouter();
 
@@ -40,28 +51,59 @@ export default function ViewOrderScreen() {
   );
 
   useEffect(() => {
-    // Load from AsyncStorage
     (async () => {
       const saved = await AsyncStorage.getItem(STORAGE_KEY.ORDERS);
       setCart(saved ? JSON.parse(saved) : []);
     })();
   }, []);
 
-  // Save changes to storage
   const syncCart = async (updatedCart: CartItem[]) => {
     setCart(updatedCart);
     await AsyncStorage.setItem(STORAGE_KEY.ORDERS, JSON.stringify(updatedCart));
   };
 
-  // Handle variation change
+  useFocusEffect(
+      React.useCallback(() => {
+        if (pathname === "/view-order-screen") {
+          resetInactivityTimer();
+        }
+  
+        return () => {
+          if (pathname === "/view-order-screen") {
+            if (inactivityTimer) clearTimeout(inactivityTimer);
+            if (autoReturnTimer) clearTimeout(autoReturnTimer);
+          }
+        };
+      }, [pathname])
+    );
+
+
   const handleVariationChange = (idx: number, newVar: string) => {
     const updated = [...cart];
     updated[idx].variation = newVar;
     syncCart(updated);
   };
 
+  const resetInactivityTimer = React.useCallback(() => {
+    if (inactivityTimer) clearTimeout(inactivityTimer);
+    if (autoReturnTimer) clearTimeout(autoReturnTimer);
+
+    const inactivity = setTimeout(() => {
+      setInactivityPromptVisible(true);
+      const autoReturn = setTimeout(async () => {
+        setInactivityPromptVisible(false);
+        await AsyncStorage.removeItem(STORAGE_KEY.ORDERS);
+        router.replace("/(tabs)/welcome-screen");
+      }, PROMPT_TIMEOUT);
+      setAutoReturnTimer(autoReturn);
+    }, INACTIVITY_DURATION);
+
+    setInactivityTimer(inactivity);
+  }, [inactivityTimer, autoReturnTimer]);
+
   // Handle quantity change
   const handleQuantityChange = (idx: number, newQty: number) => {
+    resetInactivityTimer();
     if (newQty < 1) return;
     const updated = [...cart];
     updated[idx].quantity = newQty;
@@ -181,7 +223,10 @@ export default function ViewOrderScreen() {
       <View style={styles.footer}>
         <TouchableOpacity
           style={styles.returnBtn}
-          onPress={() => router.replace("/(tabs)/menu-screen")}
+          onPress={() => {
+            resetInactivityTimer();
+            router.replace("/(tabs)/menu-screen");
+          }}
         >
           <Text style={styles.returnText}>Return</Text>
         </TouchableOpacity>
@@ -229,14 +274,77 @@ export default function ViewOrderScreen() {
 
       <ConfirmDialog
         visible={confirmPaymentVisible}
-        message="Proceed to payment?"
-        confirmText="Proceed"
-        cancelText="Cancel"
+        message="Proceed Checkout?"
         onCancel={() => setConfirmPaymentVisible(false)}
         onConfirm={() => {
           setConfirmPaymentVisible(false);
           router.replace("/(tabs)/payment-screen");
         }}
+        confirmText="Proceed"
+        cancelText="Cancel"
+        type="primary"
+      >
+        <View>
+          <Text
+            style={{
+              fontSize: 14,
+              fontWeight: "bold",
+              color: Colors.secondary,
+              textAlign: "left",
+              marginBottom: 10,
+            }}
+          >
+            PAYMENT REMINDERS
+          </Text>
+
+          <Text style={styles.reminderText}>• Accepts paper bills only.</Text>
+          <Text style={styles.reminderText}>
+            • (₱20, ₱50, ₱100, ₱200, ₱500, ₱1000)
+          </Text>
+          <Text style={styles.reminderText}>
+            • Demonetized or damaged bills will not be accepted.
+          </Text>
+          <Text style={styles.reminderText}>
+            • Polymer bills and current notes accepted.
+          </Text>
+          <Text style={styles.reminderText}>
+            • Insert the full amount within 120 seconds.
+          </Text>
+          <Text style={styles.reminderText}>
+            • Bills are non-returnable once inserted.
+          </Text>
+          <Text style={styles.reminderText}>
+            • Change will be given upon order delivery.
+          </Text>
+
+          <Text
+            style={{
+              color: "red",
+              fontStyle: "italic",
+              textAlign: "center",
+              marginTop: 8,
+            }}
+          >
+            In case of malfunction, please ask for staff assistance.
+          </Text>
+        </View>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        visible={inactivityPromptVisible}
+        message="Are you still there? If not, you'll be returned to the welcome screen."
+        confirmText="Stay"
+        cancelText="Return"
+        onCancel={async () => {
+          await AsyncStorage.removeItem(STORAGE_KEY.ORDERS);
+          setInactivityPromptVisible(false);
+          router.replace("/(tabs)/welcome-screen");
+        }}
+        onConfirm={() => {
+          setInactivityPromptVisible(false);
+          resetInactivityTimer();
+        }}
+        type="primary"
       />
     </View>
   );
@@ -427,5 +535,10 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     marginRight: 5,
+  },
+  reminderText: {
+    fontSize: 15,
+    color: Colors.secondary,
+    marginBottom: 4,
   },
 });
