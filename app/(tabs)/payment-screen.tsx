@@ -159,6 +159,7 @@ const PaymentScreen = () => {
   const doneSentRef = useRef(false);
   const returnCountdownStartedRef = useRef(false);
   const [printed, setPrinted] = useState(false);
+  const [showOrderAgainPrompt, setShowOrderAgainPrompt] = useState(false);
 
   const wsSend = (msg: WSMsg) => {
     try {
@@ -381,6 +382,7 @@ const PaymentScreen = () => {
     async (order: any, items: CartItem[]) => {
       if (printedRef.current || !order) return;
       printedRef.current = true;
+
       setPrinterError(null);
       try {
         setPrinting(true);
@@ -389,29 +391,7 @@ const PaymentScreen = () => {
         setPrinterError(e instanceof Error ? e.message : String(e));
       } finally {
         setPrinting(false);
-        setPrinted(true); // signal done
-        if (!returnCountdownStartedRef.current) {
-          returnCountdownStartedRef.current = true;
-          setReturning(false);
-          const start = setTimeout(() => {
-            setReturning(true);
-            setTimer(15);
-            countdownRef.current = setInterval(() => {
-              setTimer((prev) => {
-                if (prev <= 1) {
-                  clearInterval(countdownRef.current!);
-                  countdownRef.current = null;
-                  AsyncStorage.removeItem(STORAGE_KEY.ORDERS);
-                  setTimeout(() => router.replace("/(tabs)/welcome-screen"), 0);
-                  return 0;
-                }
-                return prev - 1;
-              });
-            }, 1000);
-          }, 1200);
-          // optional cleanup if screen unmounts mid-countdown
-          return () => clearTimeout(start);
-        }
+        setPrinted(true);
       }
     },
     [router]
@@ -431,8 +411,8 @@ const PaymentScreen = () => {
           if (prev <= 1) {
             clearInterval(countdownRef.current!);
             countdownRef.current = null;
-            AsyncStorage.removeItem(STORAGE_KEY.ORDERS);
-            setTimeout(() => router.replace("/(tabs)/welcome-screen"), 0);
+            setReturning(false);
+            setShowOrderAgainPrompt(true);
             return 0;
           }
           return prev - 1;
@@ -441,18 +421,6 @@ const PaymentScreen = () => {
     }, 1200);
     return () => clearTimeout(start);
   }, [paymentComplete, createdOrder, printed, router]);
-
-  useEffect(() => {
-    if (!paymentComplete || !createdOrder || doneSentRef.current) return;
-
-    (async () => {
-      const tn = tableNumber || (await resolveTableNumber());
-      if (orderType === "DINE_IN" && tn) {
-        sendDoneForTable(tn);
-        doneSentRef.current = true;
-      }
-    })();
-  }, [paymentComplete, createdOrder, orderType, tableNumber]);
 
   const sendDoneForTable = (tn: string | number | null | undefined) => {
     const n =
@@ -479,6 +447,36 @@ const PaymentScreen = () => {
     } catch {}
     setShowReturnConfirm(false);
     router.replace("/(tabs)/view-order-screen");
+  };
+
+  const navigateHomeAndReset = async () => {
+    try {
+      sendDeactivate();
+      webSocketServices.close();
+    } catch {}
+
+    await AsyncStorage.removeItem(STORAGE_KEY.ORDERS);
+    await AsyncStorage.removeItem(STORAGE_KEY.SAVED_ORDER);
+
+    setShowOrderAgainPrompt(false);
+    router.replace("/(tabs)/welcome-screen");
+  };
+
+  const handleOrderAgainYes = async () => {
+    await navigateHomeAndReset();
+  };
+
+  const handleOrderAgainNo = async () => {
+    if (!doneSentRef.current) {
+      try {
+        const tn = tableNumber || (await resolveTableNumber());
+        if (orderType === "DINE_IN" && tn) {
+          sendDoneForTable(tn);
+        }
+        doneSentRef.current = true;
+      } catch {}
+    }
+    await navigateHomeAndReset();
   };
 
   useEffect(() => {
@@ -698,6 +696,16 @@ const PaymentScreen = () => {
         onCancel={() => setShowReturnConfirm(false)}
         confirmText={UI.yesReturn}
         cancelText={UI.stay}
+        type="primary"
+      />
+
+      <ConfirmDialog
+        visible={showOrderAgainPrompt}
+        message="Would you like to place another order?"
+        confirmText="Order Again"
+        cancelText="Finish"
+        onConfirm={handleOrderAgainYes}
+        onCancel={handleOrderAgainNo}
         type="primary"
       />
     </View>

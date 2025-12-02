@@ -18,7 +18,7 @@ import {
   View,
 } from "react-native";
 
-const INACTIVITY_DURATION = 60000 * 5 ;
+const INACTIVITY_DURATION = 60000 * 5;
 const PROMPT_TIMEOUT = 15000;
 
 export default function ViewOrderScreen() {
@@ -36,6 +36,7 @@ export default function ViewOrderScreen() {
   const pathname = usePathname();
 
   const router = useRouter();
+  const isCartEmpty = cart.length === 0;
 
   useFocusEffect(
     React.useCallback(() => {
@@ -63,20 +64,19 @@ export default function ViewOrderScreen() {
   };
 
   useFocusEffect(
-      React.useCallback(() => {
-        if (pathname === "/view-order-screen") {
-          resetInactivityTimer();
-        }
-  
-        return () => {
-          if (pathname === "/view-order-screen") {
-            if (inactivityTimer) clearTimeout(inactivityTimer);
-            if (autoReturnTimer) clearTimeout(autoReturnTimer);
-          }
-        };
-      }, [pathname])
-    );
+    React.useCallback(() => {
+      if (pathname === "/view-order-screen") {
+        resetInactivityTimer();
+      }
 
+      return () => {
+        if (pathname === "/view-order-screen") {
+          if (inactivityTimer) clearTimeout(inactivityTimer);
+          if (autoReturnTimer) clearTimeout(autoReturnTimer);
+        }
+      };
+    }, [pathname])
+  );
 
   const handleVariationChange = (idx: number, newVar: string) => {
     const updated = [...cart];
@@ -241,9 +241,10 @@ export default function ViewOrderScreen() {
           </Text>
         </View>
         <TouchableOpacity
-          style={styles.payBtn}
+          style={[styles.payBtn, isCartEmpty && { opacity: 0.4 }]}
+          disabled={isCartEmpty}
           onPress={() => {
-            setConfirmPaymentVisible(true);
+            if (!isCartEmpty) setConfirmPaymentVisible(true);
           }}
         >
           <Text style={styles.payText}>Proceed Payment</Text>
